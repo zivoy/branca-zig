@@ -12,19 +12,20 @@ pub fn build(b: *std.Build) void {
     _ = b.addModule("branca", .{
         .target = target,
         .optimize = optimize,
-        .root_source_file = b.path("src/branca.zig"),
+        .root_source_file = b.path("branca.zig"),
     });
     const lib = b.addStaticLibrary(.{
         .name = "branca",
-        .root_source_file = b.path("src/branca.zig"),
+        .root_source_file = b.path("abi.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
     lib.root_module.addImport("base-x", baseX.module("baseX"));
     b.installArtifact(lib);
 
     const lib_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/branca.zig"),
+        .root_source_file = b.path("branca.zig"),
         .target = target,
         .optimize = optimize,
     });
