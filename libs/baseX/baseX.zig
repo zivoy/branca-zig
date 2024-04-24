@@ -1,9 +1,10 @@
 // based on https://github.com/cryptocoinjs/base-x/blob/master/src/index.js
 const std = @import("std");
+pub const alphabets = @import("bases.zig");
 
 pub fn base(comptime alphabet: []const u8) type {
     if (alphabet.len > 255) @compileError("alphabet too long");
-    const BaseMap = val: {
+    const BaseMap = comptime val: {
         var baseMap: [256]u8 = undefined;
         @memset(&baseMap, 255);
         for (alphabet, 0..) |letter, i| {
@@ -15,8 +16,6 @@ pub fn base(comptime alphabet: []const u8) type {
     return struct {
         pub const BASE: u8 = @intCast(alphabet.len);
         const LEADER = alphabet[0];
-        const FACTOR = @log(@as(f32, @floatFromInt(BASE))) / @log(@as(f32, 255));
-        const iFACTOR = @log(@as(f32, 255)) / @log(@as(f32, @floatFromInt(BASE)));
         const Self = @This();
 
         allocator: std.mem.Allocator,
@@ -26,27 +25,32 @@ pub fn base(comptime alphabet: []const u8) type {
             };
         }
 
+        inline fn sizeEncoded(inputLen: usize) usize {
+            const factor = comptime @log(@as(f32, 255)) / @log(@as(f32, @floatFromInt(alphabet.len)));
+            return @intFromFloat(@as(f32, @floatFromInt(inputLen)) * factor + 1);
+        }
+        inline fn sizeDecoded(inputLen: usize) usize {
+            const factor = comptime @log(@as(f32, @floatFromInt(alphabet.len))) / @log(@as(f32, 255));
+            return @intFromFloat(@as(f32, @floatFromInt(inputLen)) * factor + 1);
+        }
+
         pub fn encode(self: Self, source: []const u8) ![]const u8 {
             if (source.len == 0) return "";
 
             var zeroes: usize = 0;
             var length: usize = 0;
-            var pbegin: usize = 0;
-            const pend = source.len;
-            while (pbegin != pend and source[pbegin] == 0) {
-                pbegin += 1;
+            while (zeroes != source.len and source[zeroes] == 0) {
                 zeroes += 1;
             }
-            // Allocate enough space in big-endian base58 representation.
-            const size: usize = @intFromFloat(@trunc(@as(f32, @floatFromInt(pend - pbegin)) * iFACTOR + 1));
+            const size: usize = sizeEncoded(source.len - zeroes);
             var b58 = try self.allocator.alloc(u8, size);
             defer self.allocator.free(b58);
             @memset(b58, 0);
 
             // Process the bytes.
-            for (pbegin..pend) |idx| {
-                var carry: usize = @intCast(source[idx]);
-                // Apply "b58 = b58 * 256 + ch".
+            for (source[zeroes..]) |letter| {
+                var carry: usize = @intCast(letter);
+                // Apply "bX = bX * 256 + ch".
                 var i: usize = 0;
                 var it1 = size - 1;
                 while (carry != 0 or i < length) {
@@ -68,33 +72,31 @@ pub fn base(comptime alphabet: []const u8) type {
                 it2 += 1;
             }
             // Translate the result into a string.
-            var str = std.ArrayList(u8).init(self.allocator);
-            try str.appendNTimes(LEADER, zeroes);
-            while (it2 < size) : (it2 += 1) {
-                try str.append(alphabet[b58[it2]]);
+            var str = try self.allocator.alloc(u8, zeroes + (size - it2));
+            @memset(str[0..zeroes], LEADER);
+            for (zeroes..str.len, it2..) |i, j| {
+                str[i] = alphabet[b58[j]];
             }
-            return try str.toOwnedSlice();
+            return str;
         }
 
         pub fn decode(self: Self, data: []const u8) ![]const u8 {
-            var psz: usize = 0;
-            // Skip and count leading '1's.
+            // Skip and count leader
             var zeroes: usize = 0;
             var length: usize = 0;
-            while (data[psz] == LEADER) {
+            while (data[zeroes] == LEADER) {
                 zeroes += 1;
-                psz += 1;
             }
             // Allocate enough space in big-endian base256 representation.
-            const size: usize = @intFromFloat(@trunc(@as(f32, @floatFromInt(data.len - psz)) * FACTOR + 1)); // log(58) / log(256), rounded up.
+            const size: usize = sizeDecoded(data.len - zeroes);
             var b256 = try self.allocator.alloc(u8, size);
             defer self.allocator.free(b256);
             @memset(b256, 0);
 
             // Process the characters.
-            for (psz..data.len) |idx| {
+            for (data[zeroes..]) |letter| {
                 // Decode character
-                var carry: usize = @intCast(BaseMap[data[idx]]);
+                var carry: usize = @intCast(BaseMap[letter]);
                 // Invalid character
                 if (carry == 255) {
                     // @breakpoint();
@@ -102,11 +104,13 @@ pub fn base(comptime alphabet: []const u8) type {
                 }
                 var i: usize = 0;
                 var it3 = size - 1;
-                while ((carry != 0 or i < length) and (it3 != -1)) : (it3 -= 1) {
+                while (carry != 0 or i < length) {
                     carry += BASE * @as(usize, @intCast(b256[it3]));
                     b256[it3] = @intCast(carry % 256);
                     carry = carry / 256;
                     i += 1;
+                    if (it3 == 0) break;
+                    it3 -= 1;
                 }
                 if (carry != 0) {
                     return error.NonZeroCarry;
@@ -119,6 +123,7 @@ pub fn base(comptime alphabet: []const u8) type {
                 it4 += 1;
             }
             var vch = try self.allocator.alloc(u8, zeroes + (size - it4));
+            @memset(vch[0..zeroes], 0);
             var j = zeroes;
             while (it4 != size) {
                 vch[j] = b256[it4];
@@ -132,14 +137,77 @@ pub fn base(comptime alphabet: []const u8) type {
 
 const testing = std.testing;
 test "encode base 16" {
-    const encoding = base("0123456789abcdef").init(testing.allocator);
+    const b16 = base("0123456789abcdef").init(testing.allocator);
     const message = "hello!!";
-    const encoded = try encoding.encode(message);
+    const encoded = try b16.encode(message);
     defer testing.allocator.free(encoded);
 
-    const decoded = try encoding.decode(encoded);
+    const decoded = try b16.decode(encoded);
     defer testing.allocator.free(decoded);
 
-    std.debug.print("message {s}\nencoded {s}\ndecoded {s}\n", .{ message, encoded, decoded });
-    try testing.expect(std.mem.eql(u8, message, decoded));
+    // std.debug.print("message {s}\nencoded {s}\ndecoded {s}\n", .{ message, encoded, decoded });
+    try testing.expectEqualStrings(message, decoded);
+}
+
+test "base62" {
+    const target = "2nUwTMpGcx8BkP17EP";
+    const source = "hello there!!";
+    const b62 = base(alphabets.base62).init(testing.allocator);
+    const encoded = try b62.encode(source);
+    defer testing.allocator.free(encoded);
+
+    try testing.expectEqualStrings(target, encoded);
+
+    const decoded = try b62.decode(encoded);
+    defer testing.allocator.free(decoded);
+
+    try testing.expectEqualStrings(source, decoded);
+}
+
+test "base58" {
+    const target = "9hLF3DC578cdUPkTJg";
+    const source = "hello there!!";
+    const b58 = base(alphabets.base58).init(testing.allocator);
+
+    const encoded = try b58.encode(source);
+    defer testing.allocator.free(encoded);
+
+    try testing.expectEqualStrings(target, encoded);
+
+    const decoded = try b58.decode(encoded);
+    defer testing.allocator.free(decoded);
+
+    try testing.expectEqualStrings(source, decoded);
+}
+
+test "base 10 leading char" {
+    const source: []const u8 = &[_]u8{ 0, 0, 0, 1, 4, 2, 5, 2, 3 } ++ "with extra";
+    const target = "0001350038144802235762089578086238810721";
+    const b10 = base("0123456789").init(testing.allocator);
+
+    const encoded = try b10.encode(source);
+    defer testing.allocator.free(encoded);
+
+    try testing.expectEqualStrings(target, encoded);
+
+    const decoded = try b10.decode(encoded);
+    defer testing.allocator.free(decoded);
+
+    try testing.expectEqualStrings(source, decoded);
+}
+
+test "base64 no padding" {
+    const source = "some data";
+    const target = "c29tZSBkYXRh";
+    const b64 = base(alphabets.base64).init(testing.allocator);
+
+    const encoded = try b64.encode(source);
+    defer testing.allocator.free(encoded);
+
+    try testing.expectEqualStrings(target, encoded);
+
+    const decoded = try b64.decode(encoded);
+    defer testing.allocator.free(decoded);
+
+    try testing.expectEqualStrings(source, decoded);
 }
