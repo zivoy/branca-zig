@@ -20,6 +20,12 @@ pub fn base(comptime alphabet: []const u8) type {
     return struct {
         pub const BASE: u8 = @intCast(alphabet.len);
         const LEADER = alphabet[0];
+
+        pub const Error = error{
+            NonZeroCarry,
+            InvalidCharacter,
+        };
+        const baseTranslationError = Error || std.mem.Allocator.Error;
         const Self = @This();
 
         allocator: std.mem.Allocator,
@@ -38,7 +44,7 @@ pub fn base(comptime alphabet: []const u8) type {
             return @intFromFloat(@as(f32, @floatFromInt(inputLen)) * factor + 1);
         }
 
-        pub fn encode(self: Self, source: []const u8) ![]const u8 {
+        pub fn encode(self: Self, source: []const u8) baseTranslationError![]const u8 {
             if (source.len == 0) return "";
 
             var zeroes: usize = 0;
@@ -66,7 +72,7 @@ pub fn base(comptime alphabet: []const u8) type {
                     it1 -= 1;
                 }
                 if (carry != 0) {
-                    return error.NonZeroCarry;
+                    return Error.NonZeroCarry;
                 }
                 length = i;
             }
@@ -75,7 +81,6 @@ pub fn base(comptime alphabet: []const u8) type {
             while (it2 != size and bX[it2] == 0) {
                 it2 += 1;
             }
-            // Translate the result into a string.
             var str = try self.allocator.alloc(u8, zeroes + (size - it2));
             @memset(str[0..zeroes], LEADER);
             for (zeroes..str.len, it2..) |i, j| {
@@ -84,27 +89,26 @@ pub fn base(comptime alphabet: []const u8) type {
             return str;
         }
 
-        pub fn decode(self: Self, data: []const u8) ![]const u8 {
+        pub fn decode(self: Self, data: []const u8) baseTranslationError![]const u8 {
             // Skip and count leader
             var zeroes: usize = 0;
             var length: usize = 0;
-            while (data[zeroes] == LEADER and zeroes < data.len) {
+            while (zeroes < data.len and data[zeroes] == LEADER) {
                 zeroes += 1;
             }
             // Allocate enough space in big-endian base256 representation.
             const size: usize = sizeDecoded(data.len - zeroes);
-            var b256 = try self.allocator.alloc(u8, size);
-            defer self.allocator.free(b256);
-            @memset(b256, 0);
+            var vch = try self.allocator.alloc(u8, size + zeroes);
+            defer self.allocator.free(vch);
+            @memset(vch, 0);
+            var b256 = vch[zeroes..];
 
-            // Process the characters.
             for (data[zeroes..]) |letter| {
-                // Decode character
                 var carry: usize = @intCast(BaseMap[letter]);
                 // Invalid character
                 if (carry == 255) {
                     // @breakpoint();
-                    return error.InvalidCharacter;
+                    return Error.InvalidCharacter;
                 }
                 var i: usize = 0;
                 var it3 = size - 1;
@@ -117,24 +121,17 @@ pub fn base(comptime alphabet: []const u8) type {
                     it3 -= 1;
                 }
                 if (carry != 0) {
-                    return error.NonZeroCarry;
+                    return Error.NonZeroCarry;
                 }
                 length = i;
             }
-            // Skip leading zeroes in b256.
             var it4 = size - length;
             while (it4 != size and b256[it4] == 0) {
                 it4 += 1;
             }
-            var vch = try self.allocator.alloc(u8, zeroes + (size - it4));
-            @memset(vch[0..zeroes], 0);
-            var j = zeroes;
-            while (it4 != size) {
-                vch[j] = b256[it4];
-                j += 1;
-                it4 += 1;
-            }
-            return vch;
+            var res = try self.allocator.alloc(u8, vch.len - it4);
+            @memcpy(res[0..], vch[it4..]); // drop any leading useless chars
+            return res;
         }
     };
 }
@@ -195,6 +192,21 @@ test "base 10 leading char" {
     try testing.expectEqualStrings(target, encoded);
 
     const decoded = try b10.decode(encoded);
+    defer testing.allocator.free(decoded);
+
+    try testing.expectEqualStrings(source, decoded);
+}
+test "base 16 all 0" {
+    const source: []const u8 = &[_]u8{ 0, 0, 0, 0, 0 };
+    const target = "00000";
+    const b16 = base(alphabets.base16).init(testing.allocator);
+
+    const encoded = try b16.encode(source);
+    defer testing.allocator.free(encoded);
+
+    try testing.expectEqualStrings(target, encoded);
+
+    const decoded = try b16.decode(encoded);
     defer testing.allocator.free(decoded);
 
     try testing.expectEqualStrings(source, decoded);
