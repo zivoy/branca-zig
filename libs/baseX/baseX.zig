@@ -8,7 +8,11 @@ pub fn base(comptime alphabet: []const u8) type {
         var baseMap: [256]u8 = undefined;
         @memset(&baseMap, 255);
         for (alphabet, 0..) |letter, i| {
-            if (baseMap[letter] != 255) @compileError([_]u8{letter} ++ " appears more then once");
+            if (baseMap[letter] != 255) {
+                var buf: [64]u8 = undefined;
+                const message = std.fmt.bufPrint(&buf, "'{c}' appears more then once in alphabet at idx {d} and {d}", .{ letter, baseMap[letter], i }) catch @panic("OOM");
+                @compileError(message);
+            }
             baseMap[letter] = i;
         }
         break :val baseMap;
@@ -43,9 +47,9 @@ pub fn base(comptime alphabet: []const u8) type {
                 zeroes += 1;
             }
             const size: usize = sizeEncoded(source.len - zeroes);
-            var b58 = try self.allocator.alloc(u8, size);
-            defer self.allocator.free(b58);
-            @memset(b58, 0);
+            var bX = try self.allocator.alloc(u8, size);
+            defer self.allocator.free(bX);
+            @memset(bX, 0);
 
             // Process the bytes.
             for (source[zeroes..]) |letter| {
@@ -54,8 +58,8 @@ pub fn base(comptime alphabet: []const u8) type {
                 var i: usize = 0;
                 var it1 = size - 1;
                 while (carry != 0 or i < length) {
-                    carry += 256 * @as(usize, @intCast(b58[it1]));
-                    b58[it1] = @intCast(carry % BASE);
+                    carry += 256 * @as(usize, @intCast(bX[it1]));
+                    bX[it1] = @intCast(carry % BASE);
                     carry = carry / BASE;
                     i += 1;
                     if (it1 == 0) break;
@@ -66,16 +70,16 @@ pub fn base(comptime alphabet: []const u8) type {
                 }
                 length = i;
             }
-            // Skip leading zeroes in base58 result.
+            // Skip leading zeroes in baseX result.
             var it2 = size - length;
-            while (it2 != size and b58[it2] == 0) {
+            while (it2 != size and bX[it2] == 0) {
                 it2 += 1;
             }
             // Translate the result into a string.
             var str = try self.allocator.alloc(u8, zeroes + (size - it2));
             @memset(str[0..zeroes], LEADER);
             for (zeroes..str.len, it2..) |i, j| {
-                str[i] = alphabet[b58[j]];
+                str[i] = alphabet[bX[j]];
             }
             return str;
         }
@@ -84,7 +88,7 @@ pub fn base(comptime alphabet: []const u8) type {
             // Skip and count leader
             var zeroes: usize = 0;
             var length: usize = 0;
-            while (data[zeroes] == LEADER) {
+            while (data[zeroes] == LEADER and zeroes < data.len) {
                 zeroes += 1;
             }
             // Allocate enough space in big-endian base256 representation.
