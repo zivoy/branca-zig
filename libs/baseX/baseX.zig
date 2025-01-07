@@ -36,11 +36,11 @@ pub fn base(comptime alphabet: []const u8) type {
         }
 
         inline fn sizeEncoded(inputLen: usize) usize {
-            const factor = comptime @log(@as(f32, 255)) / @log(@as(f32, @floatFromInt(alphabet.len)));
+            const factor: f32 = comptime @log(@as(f32, 255)) / @log(@as(f32, @floatFromInt(alphabet.len)));
             return @intFromFloat(@as(f32, @floatFromInt(inputLen)) * factor + 1);
         }
         inline fn sizeDecoded(inputLen: usize) usize {
-            const factor = comptime @log(@as(f32, @floatFromInt(alphabet.len))) / @log(@as(f32, 255));
+            const factor: f32 = comptime @log(@as(f32, @floatFromInt(alphabet.len))) / @log(@as(f32, 255));
             return @intFromFloat(@as(f32, @floatFromInt(inputLen)) * factor + 1);
         }
 
@@ -107,7 +107,6 @@ pub fn base(comptime alphabet: []const u8) type {
                 var carry: usize = @intCast(BaseMap[letter]);
                 // Invalid character
                 if (carry == 255) {
-                    // @breakpoint();
                     return Error.InvalidCharacter;
                 }
                 var i: usize = 0;
