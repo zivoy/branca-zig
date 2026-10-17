@@ -24,17 +24,19 @@ const base62 = base("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvw
 
 const chacha20poly1305 = std.crypto.aead.chacha_poly.XChaCha20Poly1305;
 
-pub fn encode(allocator: std.mem.Allocator, key: [brancaKeyLength]u8, payload: []const u8) ![]const u8 {
+pub fn encode(allocator: std.mem.Allocator, io: std.Io, key: [brancaKeyLength]u8, payload: []const u8) ![]const u8 {
     std.debug.assert(key.len == 32);
 
     const result = try allocator.alloc(u8, brancaHeaderSize + payload.len + chacha20poly1305.tag_length);
 
     result[0] = brancaVersion;
     const preNounceSize = versionLength + timestampLength;
-    const time: timestampType = @intCast(std.time.timestamp());
+
+    const now = std.Io.Timestamp.now(io, .real);
+    const time: timestampType = @intCast(now.toSeconds());
     std.mem.writeInt(timestampType, result[versionLength..preNounceSize], time, std.builtin.Endian.big);
 
-    std.crypto.random.bytes(result[preNounceSize .. preNounceSize + nounceLength]);
+    try std.Io.randomSecure(io, result[preNounceSize .. preNounceSize + nounceLength]);
     const nounce: [nounceLength]u8 = result[preNounceSize .. preNounceSize + nounceLength].*;
 
     const payloadEnd = brancaHeaderSize + payload.len;
@@ -75,8 +77,8 @@ pub fn getTimestamp(token: []const u8) BrancaError!timestampType {
 
 ////
 
-pub fn encodeString(allocator: std.mem.Allocator, key: [brancaKeyLength]u8, payload: []const u8) ![]const u8 {
-    const encoded = try encode(allocator, key, payload);
+pub fn encodeString(allocator: std.mem.Allocator, io: std.Io, key: [brancaKeyLength]u8, payload: []const u8) ![]const u8 {
+    const encoded = try encode(allocator, io, key, payload);
     defer allocator.free(encoded);
     const b62 = base62.init(allocator);
     return try b62.encode(encoded);
@@ -102,7 +104,7 @@ const testing = std.testing;
 test "encoding" {
     const key: [brancaKeyLength]u8 = "abcd1234abcd1234abcd1234abcd1234".*;
     const message = "some message";
-    const data = try encode(testing.allocator, key, message);
+    const data = try encode(testing.allocator, testing.io, key, message);
     defer testing.allocator.free(data);
 
     try testing.expectEqual(brancaHeaderSize + message.len + chacha20poly1305.tag_length, data.len);
@@ -112,7 +114,7 @@ test "encoding" {
 test "encoding decoding" {
     const key: [brancaKeyLength]u8 = "abcd1234abcd1234abcd1234abcd1234".*;
     const message = "some message";
-    const data = try encode(testing.allocator, key, message);
+    const data = try encode(testing.allocator, testing.io, key, message);
     defer testing.allocator.free(data);
 
     const ret = try decode(testing.allocator, key, data);
@@ -125,7 +127,7 @@ test "encoding decoding" {
 test "encoding string" {
     const key: [brancaKeyLength]u8 = "abcd1234abcd1234abcd1234abcd1234".*;
     const message = "some message";
-    const data = try encodeString(testing.allocator, key, message);
+    const data = try encodeString(testing.allocator, testing.io, key, message);
     defer testing.allocator.free(data);
 
     try testing.expectEqual(77, data.len);
@@ -134,7 +136,7 @@ test "encoding string" {
 test "encoding string string" {
     const key: [brancaKeyLength]u8 = "abcd1234abcd1234abcd1234abcd1234".*;
     const message = "some message";
-    const data = try encodeString(testing.allocator, key, message);
+    const data = try encodeString(testing.allocator, testing.io, key, message);
     defer testing.allocator.free(data);
 
     const ret = try decodeString(testing.allocator, key, data);

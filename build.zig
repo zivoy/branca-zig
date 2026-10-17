@@ -9,29 +9,31 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    _ = b.addModule("branca", .{
+    const mod = b.addModule("branca", .{
         .target = target,
         .optimize = optimize,
         .root_source_file = b.path("branca.zig"),
     });
-    const lib = b.addStaticLibrary(.{
+    mod.addImport("base-x", baseX.module("baseX"));
+
+    const lib = b.addLibrary(.{
         .name = "branca",
-        .root_source_file = b.path("abi.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("abi.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+
+        .linkage = .static,
     });
-    lib.root_module.addImport("base-x", baseX.module("baseX"));
     b.installArtifact(lib);
 
-    const lib_unit_tests = b.addTest(.{
-        .root_source_file = b.path("branca.zig"),
-        .target = target,
-        .optimize = optimize,
+    const mod_unit_tests = b.addTest(.{
+        .root_module = mod,
     });
-    lib_unit_tests.root_module.addImport("base-x", baseX.module("baseX"));
-    const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
+    const run_mod_unit_tests = b.addRunArtifact(mod_unit_tests);
 
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_lib_unit_tests.step);
+    test_step.dependOn(&run_mod_unit_tests.step);
 }

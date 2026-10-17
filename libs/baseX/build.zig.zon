@@ -1,6 +1,9 @@
 .{
-    .name = "baseX",
+    .name = .base_x,
     .version = "1.0.0",
+
+    .fingerprint = 0x4c7ef23f19b8a26,
+    .minimum_zig_version = "0.14.0",
 
     .dependencies = .{},
     .paths = .{
