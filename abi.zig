@@ -1,5 +1,5 @@
 const std = @import("std");
-const branca = @import("branca.zig");
+const branca = @import("branca");
 
 comptime {
     @export(&decodeStringC, .{ .name = "decodeString", .linkage = .strong });
@@ -19,12 +19,12 @@ fn getKey(key: [*:0]u8) ![branca.brancaKeyLength]u8 {
 }
 
 const allocator = std.heap.c_allocator; //page_allocator
+var io = std.Io.Threaded.init_single_threaded; //.init(allocator, .{});
 
 // maybe make a way to pass in an allocator
 fn decodeStringC(key: [*:0]u8, token: [*]const u8, token_len: usize, output: [*]u8, output_len: usize) callconv(.c) usize {
     const akey = getKey(key) catch return 0;
     const tkn = token[0..token_len];
-    // TODO: needs io
     const ret = branca.decodeString(allocator, akey, tkn) catch return 0;
     if (output_len < ret.len) return 0;
     @memcpy(output, ret);
@@ -33,7 +33,7 @@ fn decodeStringC(key: [*:0]u8, token: [*]const u8, token_len: usize, output: [*]
 fn encodeStringC(key: [*:0]u8, payload: [*]const u8, payload_len: usize, output: [*]u8, output_len: usize) callconv(.c) usize {
     const akey = getKey(key) catch return 0;
     const data = payload[0..payload_len];
-    const ret = branca.encodeString(allocator, akey, data) catch return 0;
+    const ret = branca.encodeString(allocator, io.io(), akey, data) catch return 0;
     if (output_len < ret.len) return 0;
     @memcpy(output, ret);
     return ret.len;
@@ -49,7 +49,7 @@ fn decodeC(key: [*:0]u8, token: [*]const u8, token_len: usize, output: [*]u8, ou
 fn encodeC(key: [*:0]u8, payload: [*]const u8, payload_len: usize, output: [*]u8, output_len: usize) callconv(.c) usize {
     const akey = getKey(key) catch return 0;
     const data = payload[0..payload_len];
-    const ret = branca.encode(allocator, akey, data) catch return 0;
+    const ret = branca.encode(allocator, io.io(), akey, data) catch return 0;
     if (output_len < ret.len) return 0;
     @memcpy(output, ret);
     return ret.len;

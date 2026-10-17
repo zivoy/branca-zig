@@ -27,6 +27,7 @@ pub fn build(b: *std.Build) void {
 
         .linkage = .static,
     });
+    lib.root_module.addImport("branca", mod);
     b.installArtifact(lib);
 
     const mod_unit_tests = b.addTest(.{
